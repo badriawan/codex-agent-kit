@@ -3,6 +3,7 @@
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 import json
+import os
 from pathlib import Path
 import tempfile
 import unittest
@@ -282,7 +283,8 @@ class Hooks(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(self.store.reserve("session", "expired", self.signature))
         with self.store.connect() as db:
             self.assertEqual(db.execute("SELECT count(*) FROM route_grants_v2").fetchone()[0], 0)
-        self.assertEqual(self.store.path.stat().st_mode & 0o777, 0o600)
+        if os.name != "nt":
+            self.assertEqual(self.store.path.stat().st_mode & 0o777, 0o600)
 
 
     def fail_twice(self):
@@ -360,7 +362,8 @@ class Hooks(unittest.IsolatedAsyncioTestCase):
 
     async def test_reviewed_retry_binds_workspace_turn_and_failure_revision(self):
         self.fail_twice()
-        result = await routing.reviewed_retry("session", "/other-workspace", "", self.action,
+        other_workspace = str(Path(self.temp.name).resolve() / "other-workspace")
+        result = await routing.reviewed_retry("session", other_workspace, "", self.action,
                                               "review", "Reviewed", self.store)
         self.assertEqual(result["reason"], "review_not_required")
         await routing.reviewed_retry("session", "", "turn-a", self.action, "review-a", "Reviewed", self.store)
