@@ -1,0 +1,5 @@
+name = "worker"
+description = "Implement a clearly assigned coding task."
+model = "gpt-6.1-sol"
+model_reasoning_effort = "medium"
+developer_instructions = "Implement the assigned task within its stated scope. Inspect existing conventions first, make focused changes, and report what changed."

@@ -1,0 +1,8 @@
+# Portable settings only. Authentication and permission settings stay local.
+model = "gpt-6.1-sol"
+model_reasoning_effort = "high"
+
+[agents]
+enabled = true
+# Three spawned agents plus the primary agent.
+max_concurrent_threads_per_session = 3
