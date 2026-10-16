@@ -167,10 +167,11 @@ class RuntimeTests(unittest.TestCase):
     def test_update_repository_path_and_preserve_original_restore(self):
         self.config.write_text('[mcp_servers.jev]\ncommand="old-python"\nargs=["old-server"]\n')
         self.assertEqual(self.install()[0], 0)
-        with patch.object(runtime, 'ROOT', Path('/another-device/agent-kit')):
+        relocated_root = self.home.parent / 'another device' / 'agent-kit'
+        with patch.object(runtime, 'ROOT', relocated_root):
             self.assertEqual(self.install()[0], 0)
         self.assertEqual(self.parsed()['mcp_servers']['jev']['args'],
-                         ['/another-device/agent-kit/integrations/jev/server.py'])
+                         [str(relocated_root / 'integrations' / 'jev' / 'server.py')])
         self.assertEqual(self.call('uninstall')[0], 0)
         self.assertEqual(self.parsed(), {'mcp_servers': {'jev': {'command':'old-python', 'args':['old-server']}}})
 
