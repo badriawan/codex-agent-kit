@@ -2,13 +2,13 @@
 
 Konfigurasi agen Codex pribadi yang dapat dipasang ulang di perangkat lain. Beri tugas biasa: Codex menentukan kapan perlu meninjau rencana, mengeksplorasi kode, mencari sumber, atau mendelegasikan implementasi.
 
-Paket ini memindahkan **konfigurasi dan aturan kerja**. Login, akses model, serta koneksi layanan tetap disiapkan di setiap perangkat. Agen dipanggil saat diperlukan; memasang paket tidak langsung menjalankan semua agen.
+Paket ini memindahkan **konfigurasi dan aturan kerja**. Aturan workflow adalah instruksi yang diikuti agen, bukan scheduler yang menjamin setiap keputusan runtime. Login, akses model, serta koneksi layanan tetap disiapkan di setiap perangkat. Agen dipanggil saat diperlukan; memasang paket tidak langsung menjalankan semua agen.
 
 | Peran | Model bawaan | Reasoning | Tugas |
 | --- | --- | --- | --- |
 | Main | `gpt-6.1-sol` | high | Koordinasi, implementasi, integrasi dan verifikasi |
 | Architect | `gpt-6-astra` | high | Review rencana besar, error berulang, dan hasil tugas panjang |
-| Worker | `gpt-6.1-sol` | medium | Implementasi dengan cakupan jelas |
+| Worker | `gpt-6.1-sol` | medium | Implementasi terarah, pemeriksaan proporsional, dan laporan hasil aktual |
 | Explorer | `gpt-6-luna` | medium | Menelusuri kode tanpa mengedit |
 | Researcher | `gpt-6-luna` | medium | Mengumpulkan bukti dan dokumentasi tanpa mengedit |
 | Jev (opsional) | `jev-1.13.0` | — | Saran delegasi dan penilaian perubahan melalui TypeSafe |
@@ -16,7 +16,7 @@ Paket ini memindahkan **konfigurasi dan aturan kerja**. Login, akses model, sert
 ```mermaid
 flowchart TD
     User[Tugas biasa dari pengguna] --> Main[Main: Sol]
-    Main --> Architect[Architect: Astra\nReview sesuai pemicu]
+    Main --> Architect[Architect: Astra\nSebelum rencana besar, error yang sama berulang,\natau sebelum tugas panjang dinyatakan selesai]
     Architect --> Main
     Main -. Pilihan delegasi yang tidak sederhana .-> Jev[Jev MCP opsional\nSaran, bukan izin]
     Main --> Explorer[Explorer: Luna]
@@ -28,13 +28,15 @@ flowchart TD
     Verify --> Final[Architect bila tugas panjang\nMain menyampaikan hasil]
 ```
 
-Default: **3 thread subagen yang terbuka bersamaan**, di luar agen utama. Architect dapat meninjau sebelum/sesudah tiga agen lainnya bekerja. Kapasitas efektif mengikuti klien/runtime yang digunakan.
+Default: **3 thread subagen yang terbuka bersamaan**, di luar agen utama, sehingga totalnya **4 agen termasuk main**. Architect memakai slot subagen yang sama; jalankan review secara bertahap bila tiga slot sedang terpakai. Kapasitas efektif mengikuti batas klien/runtime yang lebih rendah.
+
+Main memeriksa bukti dari subagen, mengintegrasikan hasil, dan melakukan verifikasi akhir. Jev yang disertakan hanya memberi saran delegasi dan review perubahan; kit ini belum mengotomatisasi setiap keputusan file, tool, atau retry. Pengaturan approval dan sandbox tetap mengikuti konfigurasi perangkat Anda; kit tidak mengaktifkan `auto_review`.
 
 ## Persiapan
 
 - Git, Python **3.11 atau lebih baru**, dan Codex CLI yang mendukung standalone custom agents. Konfigurasi diperiksa terhadap `codex-cli 0.163.0`.
 - Instal Codex mengikuti [petunjuk resmi](https://learn.chatgpt.com/docs/codex/cli), lalu jalankan `codex login` di perangkat tersebut.
-- Pastikan akun/provider Anda memiliki akses ke model pada tabel. Jika tidak, edit `config/base.toml` dan `config/agents/*.toml` **sebelum memasang**. Paket ini tidak memberikan akses model.
+- Pastikan akun/provider Anda memiliki akses ke model pada tabel. Default ini dipilih untuk akun yang menguji kit, bukan jaminan ketersediaan universal. Jika perlu, edit `config/base.toml` dan `config/agents/*.toml` **sebelum memasang**. Paket ini tidak memberikan akses model.
 - Tutup sesi Codex sebelum mengubah konfigurasi. Mulai sesi baru setelah pemasangan.
 
 ## macOS / Linux / WSL
@@ -103,7 +105,7 @@ python install.py install --dry-run
 python install.py install
 ```
 
-`tree` menampilkan peran bawaan kit, bukan agen yang sedang berjalan. `status` memeriksa file/settings yang dikelola, bukan autentikasi atau keberhasilan akses model. Instalasi berulang tanpa perubahan tidak menulis ulang file atau menambah blok instruksi.
+`tree` menampilkan peran bawaan kit, pemicu architect, Jev sebagai penasihat opsional, dan batas subagen dari template konfigurasi. Output ini bukan daftar agen yang sedang berjalan dan tidak menampilkan angka aktivitas sesi. `status` memeriksa file/settings yang dikelola, bukan autentikasi atau keberhasilan akses model. Instalasi berulang tanpa perubahan tidak menulis ulang file atau menambah blok instruksi.
 
 Untuk menghapus:
 
@@ -127,7 +129,7 @@ Gunakan `--codex-home` yang sama bila sebelumnya ditentukan. Recovery mengembali
 
 ## Jev opsional
 
-Kit inti bekerja tanpa Jev. Server MCP, dependensi, tes, serta petunjuk konfigurasi per perangkat ada di [integrations/jev](integrations/jev/README.md). Siapkan `TYPESAFE_API_KEY` secara lokal; kunci tidak disimpan di repo atau dipindahkan antardevice. Panggilan Jev memakai akun TypeSafe dan dapat menimbulkan biaya. Saran Jev tidak menggantikan review architect atau memberi izin eksekusi/publikasi.
+Kit inti bekerja tanpa Jev. Server MCP, skill `$jev`, dependensi, tes, serta petunjuk konfigurasi per perangkat ada di [integrations/jev](integrations/jev/README.md). Siapkan `TYPESAFE_API_KEY` secara lokal; kunci tidak disimpan di repo atau dipindahkan antardevice. Panggilan Jev memakai akun TypeSafe dan dapat menimbulkan biaya. Saran Jev tidak menggantikan review architect atau memberi izin eksekusi/publikasi.
 
 ## Verifikasi
 
@@ -137,7 +139,7 @@ python -m unittest discover -s tests -v
 
 Tes installer menggunakan direktori sementara: pemasangan baru/berulang, dry-run, TOML kompleks, pelestarian instruksi dan file lama, uninstall setelah perubahan lain, deteksi konflik, symlink, rollback kegagalan, dan pemulihan proses terputus.
 
-GitHub Actions menjalankan tes installer pada Ubuntu, macOS, dan Windows dengan Python 3.11/3.13. Periksa status workflow repositori sebelum menganggap ketiganya telah lulus. Tes offline Jev terpisah dan tersedia di folder integrasinya. Tes ini tidak membuktikan akses akun terhadap setiap model atau memanggil API berbayar.
+GitHub Actions menjalankan tes installer, tes offline Jev, dan discovery MCP pada Ubuntu, macOS, dan Windows dengan Python 3.11/3.13. Periksa status workflow repositori sebelum menganggap ketiganya telah lulus. Tes ini tidak membuktikan akses akun terhadap setiap model atau memanggil API berbayar.
 
 ## Referensi
 

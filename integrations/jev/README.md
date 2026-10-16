@@ -45,6 +45,12 @@ Jangan masukkan nilainya ke repository, `AGENTS.md`, atau berkas konfigurasi ini
 Aplikasi desktop yang dibuka dari launcher mungkin tidak mewarisi environment
 terminal; pastikan variabel tersedia pada proses Codex yang sebenarnya.
 
+Alternatif untuk aplikasi desktop: `mcp_servers.jev.env` dapat memasok
+`TYPESAFE_API_KEY` langsung ke proses server. Masukkan nilainya hanya ke
+`config.toml` pribadi di luar repository, dengan permission privat (mode `600`
+di POSIX). Jangan menyalin konfigurasi yang berisi kunci ke repo atau perangkat
+lain; setiap perangkat perlu menyiapkan kredensialnya sendiri.
+
 Tambahkan tabel berikut ke `config.toml` di direktori konfigurasi Codex Anda
 (umumnya `~/.codex/config.toml`, atau lokasi `CODEX_HOME` Anda). Jika tabel
 `mcp_servers.jev` sudah ada, sesuaikan tabel itu agar tidak duplikat.
@@ -78,6 +84,32 @@ Mulai ulang sesi Codex setelah konfigurasi berubah. Kedua tool seharusnya tersed
 di server MCP `jev`. Untuk menonaktifkan, tambahkan `enabled = false` pada tabel
 tersebut. `settings.toml` mengatur batas waktu API 15 detik, batas masukan 12.000
 karakter, dan ambang advisory sementara 0,70. Server tidak melakukan retry API.
+
+## Skill Jev
+
+Salinan skill tersedia di `skill/jev/SKILL.md`. Untuk memasangnya, jalankan dari
+folder `integrations/jev` setelah MCP dikonfigurasi.
+
+macOS / Linux (sesuaikan tujuan bila memakai `CODEX_HOME`):
+
+```sh
+mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
+cp -R skill/jev "${CODEX_HOME:-$HOME/.codex}/skills/"
+```
+
+Windows PowerShell:
+
+```powershell
+$jevSkillsPath = if ($env:CODEX_HOME) { Join-Path $env:CODEX_HOME 'skills' } else { Join-Path $env:USERPROFILE '.codex/skills' }
+New-Item -ItemType Directory -Force -Path $jevSkillsPath | Out-Null
+Copy-Item -Recurse skill/jev $jevSkillsPath
+```
+
+Jika skill `jev` sudah ada, periksa edit lokal sebelum menyalin versi baru.
+Mulai sesi Codex baru; gunakan `$jev` untuk meminta saran delegasi atau penilaian
+perubahan. Skill juga dapat dipilih otomatis saat tugas cocok dengan deskripsinya.
+Skill ini khusus memakai advisor MCP kit; skill vendor `typesafe-ai` tetap
+digunakan untuk membangun aplikasi berbasis TypeSafe.
 
 ## Batas dan penggunaan
 

@@ -91,6 +91,36 @@ def defaults():
     }
 
 
+def role_settings():
+    result = {}
+    for role in ROLES:
+        data = tomllib.loads((ROOT / "config" / f"agents/{role}.toml").read_text(encoding="utf-8"))
+        if data.get("name") != role:
+            raise KitError(f"Invalid bundled agent: {role}")
+        result[role] = {
+            "model": data.get("model", "inherit"),
+            "effort": data.get("model_reasoning_effort", "inherit"),
+        }
+    return result
+
+
+def tree_text():
+    base = defaults()
+    roles = role_settings()
+    return ("CODEX AGENT TREE (configured roles, not live sessions)\n"
+            f"main: {base['model']} / {base['model_reasoning_effort']}\n"
+            f"  |-- architect: {roles['architect']['model']} / {roles['architect']['effort']} (review on demand)\n"
+            f"  |-- worker: {roles['worker']['model']} / {roles['worker']['effort']}\n"
+            f"  |-- explorer: {roles['explorer']['model']} / {roles['explorer']['effort']}\n"
+            f"  `-- researcher: {roles['researcher']['model']} / {roles['researcher']['effort']}\n"
+            "Architect triggers: before a large plan; same error repeats; before a long task is declared complete\n"
+            "Jev: optional MCP advisor (route_work / review_change); main owns decisions\n"
+            f"Default: {base['agents.max_concurrent_threads_per_session']} concurrent subagents, excluding main "
+            f"({base['agents.max_concurrent_threads_per_session'] + 1} total including main)\n"
+            "Architect shares the subagent slots; stage work within the runtime limit\n"
+            "Main integrates results and performs final verification")
+
+
 def load_manifest(home):
     raw = text_file(home / STATE)
     if not raw:
@@ -343,14 +373,7 @@ def main(argv=None):
                 verify_current(home, state, doc)
                 print("Agent kit installed; managed settings and files match. This is not live agent status.")
         else:
-            print("CODEX AGENT TREE (configured roles, not live sessions)\n"
-                  "main: gpt-6.1-sol / high\n"
-                  "  |-- architect: gpt-6-astra / high (review on demand)\n"
-                  "  |-- worker: gpt-6.1-sol / medium\n"
-                  "  |-- explorer: gpt-6-luna / medium\n"
-                  "  `-- researcher: gpt-6-luna / medium\n"
-                  "Jev: optional MCP advisor; not a persistent agent\n"
-                  "Default: three concurrent subagents, excluding main")
+            print(tree_text())
     except (KitError, OSError, ValueError, TypeError, tomlkit.exceptions.ParseError) as error:
         # Parser errors can contain existing configuration values. Do not echo them.
         message = str(error) if isinstance(error, KitError) else f"{type(error).__name__}: cannot safely process files; no configuration values are printed."

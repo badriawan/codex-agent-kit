@@ -3,6 +3,7 @@ import importlib.util
 import io
 import json
 from pathlib import Path
+import shutil
 import tempfile
 import tomllib
 import unittest
@@ -249,6 +250,54 @@ class InstallTests(unittest.TestCase):
         before = self.snapshot()
         self.assertEqual(self.run_command("recover")[0], 1)
         self.assertEqual(before, self.snapshot())
+
+    def test_tree_reads_models_from_templates(self):
+        custom_root = Path(self.temp.name) / "custom bundle"
+        shutil.copytree(kit.ROOT / "config", custom_root / "config")
+        base = custom_root / "config/base.toml"
+        base.write_text(base.read_text().replace('gpt-6.1-sol', 'custom-main', 1).replace('max_concurrent_threads_per_session = 3', 'max_concurrent_threads_per_session = 2'))
+        worker = custom_root / "config/agents/worker.toml"
+        worker.write_text(worker.read_text().replace('gpt-6.1-sol', 'custom-worker'))
+        with patch.object(kit, "ROOT", custom_root):
+            code, out, _ = self.run_command("tree")
+        self.assertEqual(code, 0)
+        self.assertIn("main: custom-main / high", out)
+        self.assertIn("worker: custom-worker / medium", out)
+        self.assertIn("2 concurrent subagents, excluding main (3 total including main)", out)
+        self.assertIn("configured roles, not live sessions", out)
+
+    def test_upgrade_from_previous_bundle_preserves_originals_and_unmanaged_settings(self):
+        self.put("config.toml", 'model = "personal-original"\n\n[mcp_servers.local]\ncommand = "python"\n')
+        previous_root = Path(self.temp.name) / "previous bundle"
+        shutil.copytree(kit.ROOT / "config", previous_root / "config")
+        base = previous_root / "config/base.toml"
+        base.write_text(base.read_text().replace('gpt-6.1-sol', 'gpt-5.6-sol', 1))
+        for role in ("worker", "explorer", "researcher"):
+            path = previous_root / f"config/agents/{role}.toml"
+            text = path.read_text().replace("gpt-6.1-sol", "gpt-5.6-sol")
+            path.write_text(text.replace("gpt-6-luna", "gpt-5.6-luna"))
+        with patch.object(kit, "ROOT", previous_root):
+            self.assertEqual(self.run_command()[0], 0)
+        path = self.home / "config.toml"
+        self.assertEqual(tomllib.loads(path.read_text())["model"], "gpt-5.6-sol")
+        self.assertEqual(tomllib.loads((self.home / "agents/explorer.toml").read_text())["model"], "gpt-5.6-luna")
+        with path.open("a") as stream:
+            stream.write('\n[projects."/work"]\ntrust_level = "trusted"\n')
+        self.assertEqual(self.run_command()[0], 0)
+        upgraded = tomllib.loads(path.read_text())
+        self.assertEqual(upgraded["model"], "gpt-6.1-sol")
+        self.assertEqual(tomllib.loads((self.home / "agents/worker.toml").read_text())["model"], "gpt-6.1-sol")
+        self.assertEqual(tomllib.loads((self.home / "agents/explorer.toml").read_text())["model"], "gpt-6-luna")
+        self.assertEqual(upgraded["mcp_servers"]["local"]["command"], "python")
+        self.assertEqual(upgraded["projects"]["/work"]["trust_level"], "trusted")
+        before = self.snapshot()
+        self.assertEqual(self.run_command()[0], 0)
+        self.assertEqual(before, self.snapshot())
+        self.assertEqual(self.run_command("uninstall")[0], 0)
+        restored = tomllib.loads(path.read_text())
+        self.assertEqual(restored["model"], "personal-original")
+        self.assertEqual(restored["mcp_servers"]["local"]["command"], "python")
+        self.assertEqual(restored["projects"]["/work"]["trust_level"], "trusted")
 
 
 if __name__ == "__main__":
