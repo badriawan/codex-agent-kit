@@ -29,7 +29,10 @@ class Boundaries(unittest.IsolatedAsyncioTestCase):
         with patch.object(server, "_request", AsyncMock(return_value=response())):
             async with Client(server.mcp) as client:
                 tools = (await client.list_tools()).tools
-                self.assertEqual({tool.name for tool in tools}, {"route_work", "review_change"})
+                self.assertEqual({tool.name for tool in tools}, {
+                    "route_work", "review_change", "choose_file", "choose_tool",
+                    "retry_decision", "choose_action", "pre_tool", "post_tool",
+                    "reviewed_retry", "report_outcome"})
                 result = await client.call_tool("route_work", {"task_summary": "Read code"})
         self.assertFalse(result.is_error)
         self.assertEqual(result.structured_content["decision"]["choice"], "main")

@@ -5,6 +5,7 @@ import json
 import logging
 import math
 import os
+import sqlite3
 from pathlib import Path
 import time
 import tomllib
@@ -12,6 +13,8 @@ from typing import Literal
 
 from mcp.server import MCPServer
 from typesafe_sdk import AsyncTypeSafeClient, Choice, Noul, RetryPolicy, Score
+import decisions
+import routing
 
 
 SETTINGS = tomllib.loads(Path(__file__).with_name("settings.toml").read_text())
@@ -41,6 +44,7 @@ mcp = MCPServer(
     ),
     log_level="WARNING",
 )
+store = routing.RouteStore()
 # The SDK may otherwise enable body logging through inherited environment settings.
 logging.getLogger("typesafe_sdk").disabled = True
 
@@ -130,6 +134,125 @@ async def route_work(task_summary: str) -> dict[str, object]:
         )},
         ROLES,
     )
+
+
+@mcp.tool()
+async def choose_file(task_summary: str, candidates: list[dict]) -> dict[str, object]:
+    """Automatically select a supplied relative file candidate; never invent a path.
+
+    Candidates contain id, path, summary. Send non-secret metadata only.
+    Uncertainty returns to main; no file is read or written by this tool.
+    """
+    return await decisions.choose_file(task_summary, candidates, _evaluate)
+
+
+@mcp.tool()
+async def choose_tool(task_summary: str, candidates: list[dict]) -> dict[str, object]:
+    """Select a supplied available tool by id/name/summary; no tool is executed."""
+    return await decisions.choose_tool(task_summary, candidates, _evaluate)
+
+
+@mcp.tool()
+async def retry_decision(task_summary: str, error_summary: str, attempts: int,
+                         retry_safe: bool = False, permission_denied: bool = False) -> dict[str, object]:
+    """Choose retry/change/stop. Two matching failures require architect review.
+
+    Permission denial always stops. Retries require explicit replay safety.
+    Only a non-secret error summary is sent; this tool never replays an action.
+    """
+    return await decisions.retry_decision(task_summary, error_summary, attempts,
+                                          retry_safe, permission_denied, _evaluate)
+
+
+async def _choose_action(task_summary, candidates):
+    return await decisions.choose_action(task_summary, candidates, _evaluate)
+
+
+async def _retry(task_summary, error_summary, attempts, retry_safe, permission_denied):
+    return await decisions.retry_decision(task_summary, error_summary, attempts,
+                                          retry_safe, permission_denied, _evaluate)
+
+
+@mcp.tool()
+async def choose_action(session_id: str, cwd: str, turn_id: str,
+                        task_summary: str, candidates: list[dict]) -> dict[str, object]:
+    """Choose a complete file/tool action and register it for native PreToolUse.
+
+    Each candidate: id, tool_name, input object, files (relative paths), summary,
+    retry_safe boolean. Input is kept LOCAL; only summaries/file/tool metadata
+    go to TypeSafe. Execute the selected candidate through normal Codex tools.
+    On uncertain/unavailable results main chooses once from validated candidates.
+    Obtain session_id/cwd/turn_id from the hook's first-call context. No permission
+    is granted; sandbox and native Auto-review remain in charge.
+    """
+    try:
+        return await routing.select_action(session_id, task_summary, candidates,
+                                            _choose_action, _retry, store, cwd=cwd, turn_id=turn_id)
+    except (OSError, ValueError, TypeError, KeyError, sqlite3.Error):
+        return _failure("unavailable", "local_routing_state_unavailable")
+
+
+@mcp.tool()
+async def reviewed_retry(session_id: str, cwd: str, turn_id: str, candidate: dict,
+                         review_reference: str, review_summary: str) -> dict[str, object]:
+    """Register one safe retry after actual architect review of repeated failures.
+
+    Main must supply its real review reference and non-secret summary. This is a
+    main-agent attestation, not independent verification of the review. It never
+    clears permission denials, executes commands, or grants sandbox permissions.
+    """
+    try:
+        return await routing.reviewed_retry(session_id, cwd, turn_id, candidate,
+                                             review_reference, review_summary, store)
+    except (OSError, ValueError, TypeError, KeyError, sqlite3.Error):
+        return _failure("unavailable", "local_routing_state_unavailable")
+
+
+@mcp.tool()
+async def report_outcome(session_id: str, cwd: str, turn_id: str, tool_use_id: str,
+                         exit_code: int | None = None,
+                         permission_denied: bool = False) -> dict[str, object]:
+    """Reconcile stdout-only native hooks using the actual observed tool status.
+
+    Call automatically when PostToolUse requests it. Report the original tool's
+    exit code/permission denial, never infer from stdout. This is main-attested
+    evidence and can update an unknown record only once. Sends no raw output.
+    """
+    try:
+        return await routing.report_outcome(session_id, cwd, turn_id, tool_use_id,
+                                             exit_code, permission_denied, store, _retry)
+    except (OSError, ValueError, TypeError, KeyError, sqlite3.Error):
+        return _failure("unavailable", "local_routing_state_unavailable")
+
+
+@mcp.tool()
+async def pre_tool(session_id: str, tool_use_id: str, tool_name: str,
+                   tool_input: object, cwd: str = "", turn_id: str = "") -> dict[str, object]:
+    """Native PreToolUse endpoint. No raw input is sent to TypeSafe or logged.
+
+    Checks the previously selected candidate. Never approve permissions, execute
+    tools, rewrite commands, or skip native Auto-review. Jev/control calls exempt.
+    """
+    try:
+        return routing.pre_tool(session_id, tool_use_id, tool_name, tool_input, store, cwd=cwd, turn_id=turn_id)
+    except (OSError, ValueError, TypeError, KeyError, sqlite3.Error):
+        return routing.context("PreToolUse", "Jev local routing unavailable; main must assess once. Native approvals remain unchanged.")
+
+
+@mcp.tool()
+async def post_tool(session_id: str, tool_use_id: str, tool_name: str,
+                    tool_input: object, tool_response: object = None,
+                    cwd: str = "", turn_id: str = "") -> dict[str, object]:
+    """Native PostToolUse endpoint: record explicit failures, choose retry policy.
+
+    Raw input/output stays local and is never sent to TypeSafe, stored, or echoed.
+    Original tool evidence is retained. Hooks do not replay or approve commands.
+    """
+    try:
+        return await routing.post_tool(session_id, tool_use_id, tool_name, tool_input,
+                                         tool_response, store, _retry, cwd=cwd, turn_id=turn_id)
+    except (OSError, ValueError, TypeError, KeyError, sqlite3.Error):
+        return routing.context("PostToolUse", "Jev outcome tracking unavailable; main must inspect original evidence.")
 
 
 @mcp.tool()

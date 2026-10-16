@@ -1,8 +1,11 @@
 # Jev MCP opsional
 
-Integrasi ini memberi saran delegasi melalui `route_work` dan penilaian perubahan
-melalui `review_change`. Instalasi inti kit **tidak mengaktifkan Jev**. Tambahkan
-konfigurasi berikut secara manual hanya jika Anda ingin memakainya.
+Integrasi ini memilih kandidat file (`choose_file`), tool (`choose_tool`), aksi
+lengkap (`choose_action`), dan langkah retry (`retry_decision`), selain delegasi
+(`route_work`) dan review perubahan (`review_change`). Hook native `pre_tool` dan
+`post_tool` otomatis memeriksa pilihan dan mencatat hasil panggilan lokal.
+Instalasi inti kit **tidak mengaktifkan Jev**; routing dipasang melalui installer
+opt-in pada README utama. Konfigurasi manual di bawah cocok untuk tool tanpa hook.
 
 File server, pengaturan, dependensi langsung, dan tes mempertahankan integrasi
 asal: model `jev-1.13.0`, `typesafe-sdk==0.7.5`, dan `mcp==2.3.0`.
@@ -63,7 +66,7 @@ macOS / Linux:
 command = "/ABSOLUTE/PATH/codex-agent-kit/integrations/jev/.venv/bin/python"
 args = ["/ABSOLUTE/PATH/codex-agent-kit/integrations/jev/server.py"]
 env_vars = ["TYPESAFE_API_KEY"]
-enabled_tools = ["route_work", "review_change"]
+enabled_tools = ["route_work", "review_change", "choose_file", "choose_tool", "retry_decision", "choose_action", "pre_tool", "post_tool", "reviewed_retry", "report_outcome"]
 startup_timeout_sec = 20
 tool_timeout_sec = 25
 ```
@@ -75,12 +78,12 @@ Windows (gunakan garis miring `/` dalam string TOML):
 command = "C:/ABSOLUTE/PATH/codex-agent-kit/integrations/jev/.venv/Scripts/python.exe"
 args = ["C:/ABSOLUTE/PATH/codex-agent-kit/integrations/jev/server.py"]
 env_vars = ["TYPESAFE_API_KEY"]
-enabled_tools = ["route_work", "review_change"]
+enabled_tools = ["route_work", "review_change", "choose_file", "choose_tool", "retry_decision", "choose_action", "pre_tool", "post_tool", "reviewed_retry", "report_outcome"]
 startup_timeout_sec = 20
 tool_timeout_sec = 25
 ```
 
-Mulai ulang sesi Codex setelah konfigurasi berubah. Kedua tool seharusnya tersedia
+Mulai ulang sesi Codex setelah konfigurasi berubah. Sepuluh tool seharusnya tersedia
 di server MCP `jev`. Untuk menonaktifkan, tambahkan `enabled = false` pada tabel
 tersebut. `settings.toml` mengatur batas waktu API 15 detik, batas masukan 12.000
 karakter, dan ambang advisory sementara 0,70. Server tidak melakukan retry API.
@@ -112,6 +115,28 @@ Skill ini khusus memakai advisor MCP kit; skill vendor `typesafe-ai` tetap
 digunakan untuk membangun aplikasi berbasis TypeSafe.
 
 ## Batas dan penggunaan
+
+- Agen menyediakan kandidat lengkap dengan ID, nama tool, input lokal, file
+  relatif, ringkasan, dan keamanan retry. Jev memilih kandidat yang tersedia;
+  hook tidak menciptakan perintah atau mengganti target patch. Pilihan discope
+  ke sesi, workspace, dan turn, dengan satu konsumsi per keputusan.
+- Hanya ringkasan task/kandidat/error dan metadata file/tool yang dikirim ke API.
+  Argumen asli, output, transcript, konfigurasi, dan environment tetap lokal.
+  Jangan memasukkan isinya ke kolom ringkasan. State SQLite menyimpan fingerprint
+  dan hasil/status, bukan isi perintah atau output.
+- Hook native perlu direview dan dipercaya melalui `/hooks`. Hosted tools,
+  `write_stdin` yang melanjutkan proses lama, dan beberapa jalur khusus tidak
+  diintersepsi. Server yang tidak tersedia atau hook error memakai fallback
+  main; hook bukan batas keamanan dan bukan pengganti sandbox.
+- Hasil tidak pasti mengembalikan satu pilihan ke main. Kegagalan terstruktur
+  dipertahankan; hasil yang tidak dikenali tidak dianggap lulus. Tidak ada
+  replay otomatis. Penolakan izin menghentikan retry; dua kegagalan identik
+  meminta review architect, terlepas dari confidence. Setelah review dan perbaikan,
+  `reviewed_retry` memberi satu percobaan aman pada revisi kegagalan yang sama;
+  referensi review merupakan attestasi main, bukan verifikasi independen server.
+- Pada CLI yang hanya mengirim stdout ke hook, agen memanggil `report_outcome`
+  secara otomatis dengan exit status asli. Stdout mentah tetap `unknown` dan
+  tidak boleh digunakan untuk menyimpulkan sukses atau penolakan izin.
 
 - Permintaan tool mengirim ringkasan yang Anda berikan ke TypeSafe dan dapat
   dikenai biaya API terpisah. Kirim hanya ringkasan singkat tanpa secret atau

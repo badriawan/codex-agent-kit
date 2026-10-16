@@ -19,7 +19,9 @@ async def check(live: bool):
     async with Client(parameters) as client:
         tools = (await client.list_tools()).tools
         names = sorted(tool.name for tool in tools)
-        assert names == ["review_change", "route_work"], names
+        assert names == sorted(["route_work", "review_change", "choose_file", "choose_tool",
+                                "retry_decision", "choose_action", "pre_tool", "post_tool",
+                                "reviewed_retry", "report_outcome"]), names
         print("MCP tools:", ", ".join(names))
         if live:
             cases = [

@@ -19,5 +19,5 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - run: python install.py tree
       - run: python -m pip install -r integrations/jev/requirements.txt
-      - run: python -m unittest discover -s integrations/jev -p test_server.py -v
+      - run: python -m unittest discover -s integrations/jev -p "test_*.py" -v
       - run: python integrations/jev/check_connection.py
