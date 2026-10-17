@@ -16,9 +16,12 @@ Use `choose_file(task_summary, candidates)` with candidates containing `id`,
 with candidates containing `id`, `name`, and `summary`; include only tools that
 are actually available. Provide plausible alternatives where there is a choice.
 
-Before a supported local action, call `choose_action` with `session_id`, `cwd`,
-`turn_id`, `task_summary`, and `candidates`. The native hook provides the three
-scope values when a call first needs routing. Each candidate contains:
+At the start of each turn/workspace, call `routing_context` with no arguments.
+Its native hook supplies the exact `session_id`, `cwd`, and `turn_id` without
+blocking an action. Use that scope in `choose_action` before supported local
+actions; never reuse another turn's scope. If the endpoint or its hook context
+is unavailable, report the limitation rather than inventing scope or deliberately
+triggering a blocked call. Each candidate contains:
 
 - `id`: unique simple identifier, excluding main/retry/change/stop/architect.
 - `tool_name`: native hook name such as `Bash`, `apply_patch`, or exact MCP name.
@@ -32,7 +35,10 @@ Use native `tool_input.command` for Bash and apply_patch. Execute the selected
 candidate through the ordinary tool; the hook checks the routing record. Shell
 routing checks the native input observed by Codex, not arbitrary I/O performed
 inside a script. Hooks never rewrite commands or patch targets.
-Use the tool name and input keys supplied by hook feedback. `max_output_tokens`
+Verified callable/native aliases normalize centrally, including the plugin
+search tool's single/double namespace underscore and `web__run`/`webrun`.
+Other tool names and all input keys must match; never collapse underscores
+generally. Use the native input shape when the host exposes one. `max_output_tokens`
 and `yield_time_ms` are output transport options and do not affect matching;
 execution-affecting options are retained when the runtime exposes them.
 
@@ -68,8 +74,9 @@ real review reference, and non-secret review summary. This main-attested review
 is tied to the current failure revision and cannot override permission denial.
 
 Native hooks cover supported local function tools, shell, patches, and MCP tools.
-Hosted tools such as web search and ongoing `write_stdin` transport are not
-intercepted. Jev and review/control calls are exempt to avoid recursion/deadlock.
+Coverage depends on the host; web search may also be intercepted. Ongoing
+`write_stdin` transport is outside hook coverage. Jev and review/control calls
+are exempt to avoid recursion/deadlock; the context probe only emits scope.
 Missing servers or hook failures fall back to main; hooks are not a security boundary.
 
 ## Delegation and change review

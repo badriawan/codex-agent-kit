@@ -36,6 +36,7 @@ class RuntimeTests(unittest.TestCase):
         self.assertEqual(self.install()[0], 0)
         doc = self.parsed()
         self.assertEqual(doc['mcp_servers']['jev']['env_vars'], ['TYPESAFE_API_KEY'])
+        self.assertIn('routing_context', doc['mcp_servers']['jev']['enabled_tools'])
         for event in ('PreToolUse', 'PostToolUse'):
             template = doc['hooks'][event][0]['hooks'][0]['input']
             self.assertEqual(template['cwd'], '${cwd}')
@@ -64,6 +65,25 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual(groups[0]['hooks'][0]['input']['turn_id'], '${turn_id}')
         self.assertEqual(self.call('uninstall')[0], 0)
         self.assertEqual(self.parsed(), {})
+
+    def test_upgrade_adds_context_tool_and_restores_original_allowlist(self):
+        self.config.write_text('[mcp_servers.jev]\nenabled_tools=["route_work"]\n')
+        self.assertEqual(self.install()[0], 0)
+        doc = runtime.tomlkit.parse(self.config.read_text())
+        state_path = self.home / runtime.STATE
+        state = json.loads(state_path.read_text())
+        old_tools = [name for name in runtime.TOOLS if name != 'routing_context']
+        doc['mcp_servers']['jev']['enabled_tools'] = old_tools
+        state['keys']['mcp_servers.jev.enabled_tools']['installed']['value'] = old_tools
+        self.config.write_text(runtime.tomlkit.dumps(doc))
+        state_path.write_text(json.dumps(state))
+        self.assertEqual(self.install()[0], 0)
+        self.assertEqual(self.parsed()['mcp_servers']['jev']['enabled_tools'].count('routing_context'), 1)
+        before = self.config.read_bytes()
+        self.assertEqual(self.install()[0], 0)
+        self.assertEqual(self.config.read_bytes(), before)
+        self.assertEqual(self.call('uninstall')[0], 0)
+        self.assertEqual(self.parsed(), {'mcp_servers': {'jev': {'enabled_tools': ['route_work']}}})
 
     def test_custom_env_vars_merge_preserves_secrets_and_restores(self):
         self.config.write_text('[mcp_servers.jev]\nenv_vars=["CUSTOM", "TYPESAFE_API_KEY", "CUSTOM"]\n[mcp_servers.jev.env]\nTYPESAFE_API_KEY="secret-test-key"\nOTHER="kept"\n')

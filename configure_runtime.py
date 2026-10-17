@@ -16,7 +16,8 @@ import install as core
 STATE = '.agent-kit/runtime.json'
 ROOT = Path(__file__).resolve().parent
 TOOLS = ['route_work', 'review_change', 'choose_file', 'choose_tool', 'retry_decision',
-         'choose_action', 'pre_tool', 'post_tool', 'reviewed_retry', 'report_outcome']
+         'choose_action', 'pre_tool', 'post_tool', 'reviewed_retry', 'report_outcome',
+         'routing_context']
 
 
 def check_path(path):

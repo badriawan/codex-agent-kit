@@ -40,7 +40,9 @@ mcp = MCPServer(
     instructions=(
         "Advisory tools using the TypeSafe API. Send only minimal non-secret summaries. "
         "Results cannot grant permissions, approve commands, or replace required architect review. "
-        "Unavailable or uncertain results require the main agent's judgment."
+        "Unavailable or uncertain results require the main agent's judgment. "
+        "When native routing is enabled, call routing_context once at the start of "
+        "each turn before gated actions; its hook supplies the exact routing scope."
     ),
     log_level="WARNING",
 )
@@ -174,6 +176,19 @@ async def _retry(task_summary, error_summary, attempts, retry_safe, permission_d
 
 
 @mcp.tool()
+async def routing_context() -> dict[str, object]:
+    """Get this turn's routing scope through the native PreToolUse hook.
+
+    Call once before the first supported action in each turn/workspace. The
+    hook supplies session_id/cwd/turn_id in additional context without blocking
+    or granting an action. This endpoint makes no API request and reads no
+    global latest-session state. If hook context is absent, do not invent scope.
+    """
+    return {"advisory_only": True, "next_step": "use_scope_from_native_hook",
+            "scope_source": "PreToolUse additionalContext", "grants_action": False}
+
+
+@mcp.tool()
 async def choose_action(session_id: str, cwd: str, turn_id: str,
                         task_summary: str, candidates: list[dict]) -> dict[str, object]:
     """Choose a complete file/tool action and register it for native PreToolUse.
@@ -182,7 +197,7 @@ async def choose_action(session_id: str, cwd: str, turn_id: str,
     retry_safe boolean. Input is kept LOCAL; only summaries/file/tool metadata
     go to TypeSafe. Execute the selected candidate through normal Codex tools.
     On uncertain/unavailable results main chooses once from validated candidates.
-    Obtain session_id/cwd/turn_id from the hook's first-call context. No permission
+    Obtain session_id/cwd/turn_id by calling routing_context first each turn. No permission
     is granted; sandbox and native Auto-review remain in charge.
     """
     try:

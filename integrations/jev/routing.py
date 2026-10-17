@@ -22,6 +22,16 @@ CONTROL_TOOLS = {
     "wait_agent", "list_agents", "request_user_input", "request_user_input_async",
 }
 
+# Exact transport aliases observed in the native client. Keep the native name
+# canonical so its existing denial/failure history remains effective. Never
+# collapse underscores generally: they can separate real MCP namespaces.
+TOOL_ALIASES = {
+    "mcp__codex_apps__plugin_management_search_plugins":
+        "mcp__codex_apps__plugin_management__search_plugins",
+    "web__run": "webrun",
+}
+CONTEXT_TOOL = "mcp__jev__routing_context"
+
 
 def exempt(name):
     leaf = name.rsplit(".", 1)[-1]
@@ -36,6 +46,7 @@ def _hash(value):
 
 
 def fingerprint(name, arguments):
+    name = TOOL_ALIASES.get(name, name)
     if name in {"Bash", "exec_command", "shell"}:
         name = "Bash"
         if isinstance(arguments, dict):
@@ -371,6 +382,13 @@ async def report_outcome(session_id, cwd, turn_id, tool_use_id, exit_code,
 
 
 def pre_tool(session_id, tool_use_id, tool_name, tool_input, store, cwd="", turn_id=""):
+    if tool_name == CONTEXT_TOOL:
+        if not valid_identity(session_id, tool_use_id) or not valid_scope(cwd, turn_id):
+            return context("PreToolUse", "Jev routing scope unavailable. Do not guess or reuse another turn's scope; native approvals still apply.")
+        args = json.dumps({"session_id": session_id, "cwd": cwd, "turn_id": turn_id}, ensure_ascii=False)
+        return context("PreToolUse", "Jev routing scope for this turn: " + args +
+                       ". Use these exact values in choose_action before the next supported action. "
+                       "This context probe grants no action and must be repeated in a different turn or workspace.")
     if exempt(tool_name):
         return {}
     if not valid_identity(session_id, tool_use_id) or not valid_scope(cwd, turn_id):
@@ -382,11 +400,11 @@ def pre_tool(session_id, tool_use_id, tool_name, tool_input, store, cwd="", turn
                            "input_keys": sorted(tool_input) if isinstance(tool_input, dict) else []})
     return context("PreToolUse", "Call mcp__jev__choose_action before this local tool with these exact scope arguments: " + args + ". Native input shape: " + observed + ". "
                    "Also supply task_summary and candidates containing id, tool_name, input, files, summary, retry_safe. "
-                   "Use the native tool name and input keys above; Bash command and exec_command cmd normalize. Output transport fields max_output_tokens/yield_time_ms are ignored; execution context is not. "
+                   "Use the native tool name and input keys above; verified transport aliases and Bash command/exec_command cmd normalize. Output transport fields max_output_tokens/yield_time_ms are ignored; execution context is not. "
                    "Command-only hooks require command-only candidates. Scope cannot be reused in another workspace or turn. "
                    "Only non-secret summaries go to Jev. Execute one exact selected/main fallback candidate. "
                    "If no eligible candidates remain, replan. Do not repeat a blocked call without a decision. "
-                   "Architect/control and Jev calls are exempt.", True)
+                   "Obtain scope without a blocked action by calling mcp__jev__routing_context first each turn. Architect/control and Jev calls are exempt.", True)
 
 
 async def post_tool(session_id, tool_use_id, tool_name, tool_input, tool_response, store, retry, cwd="", turn_id=""):

@@ -32,10 +32,19 @@ class Boundaries(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual({tool.name for tool in tools}, {
                     "route_work", "review_change", "choose_file", "choose_tool",
                     "retry_decision", "choose_action", "pre_tool", "post_tool",
-                    "reviewed_retry", "report_outcome"})
+                    "reviewed_retry", "report_outcome", "routing_context"})
                 result = await client.call_tool("route_work", {"task_summary": "Read code"})
         self.assertFalse(result.is_error)
         self.assertEqual(result.structured_content["decision"]["choice"], "main")
+
+    async def test_routing_context_is_local_and_does_not_invent_scope(self):
+        with patch.object(server, "_request", AsyncMock()) as request:
+            async with Client(server.mcp) as client:
+                result = await client.call_tool("routing_context", {})
+        self.assertFalse(result.is_error)
+        self.assertFalse(result.structured_content["grants_action"])
+        self.assertNotIn("session_id", result.structured_content)
+        request.assert_not_called()
 
     async def test_ambiguous_distribution_is_uncertain(self):
         r = response(confidence=0.2)

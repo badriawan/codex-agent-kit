@@ -77,6 +77,104 @@ class Hooks(unittest.IsolatedAsyncioTestCase):
             results = list(executor.map(lambda name: self.store.reserve("session", name, self.signature), ["a", "b"]))
         self.assertEqual(sorted(results), [False, True])
 
+    async def test_verified_tool_aliases_match_both_directions_once(self):
+        for alias, native in routing.TOOL_ALIASES.items():
+            for selected, observed in ((alias, native), (native, alias)):
+                with self.subTest(selected=selected):
+                    action = {**candidate(), "tool_name": selected,
+                              "input": {"query": "Jev", "limit": 5}}
+                    self.choose.return_value = {"disposition": "selected", "selected_candidate": action}
+                    await self.register(action)
+                    pre = routing.pre_tool("session", "alias-call", observed, action["input"], self.store)
+                    self.assertNotIn("permissionDecision", pre["hookSpecificOutput"])
+                    await routing.post_tool("session", "alias-call", native, action["input"],
+                                            {"exit_code": 0}, self.store, self.retry)
+                    self.assertEqual(routing.pre_tool("session", "replay", observed, action["input"],
+                                                      self.store)["hookSpecificOutput"]["permissionDecision"], "deny")
+                    # Each subcase has its own native call identity.
+                    with self.store.connect() as db:
+                        db.execute("DELETE FROM route_calls_v2")
+
+    async def test_alias_does_not_merge_other_names_arguments_or_scopes(self):
+        alias = "mcp__codex_apps__plugin_management_search_plugins"
+        native = "mcp__codex_apps__plugin_management__search_plugins"
+        action = {**candidate(), "tool_name": alias, "input": {"query": "Jev", "limit": 5}}
+        workspace = str(Path(self.temp.name).resolve())
+        self.store.grant("session", [action], workspace, "turn")
+        for name, args, session, cwd, turn in [
+            (native, {"query": "another", "limit": 5}, "session", workspace, "turn"),
+            (native.replace("codex_apps", "other_provider"), action["input"], "session", workspace, "turn"),
+            (native.replace("__search_plugins", "___search_plugins"), action["input"], "session", workspace, "turn"),
+            (native + "_extra", action["input"], "session", workspace, "turn"),
+            (native, action["input"], "other-session", workspace, "turn"),
+            (native, action["input"], "session", workspace + "/other", "turn"),
+            (native, action["input"], "session", workspace, "other-turn"),
+        ]:
+            self.assertFalse(self.store.reserve(session, "wrong", routing.fingerprint(name, args), cwd, turn))
+        self.assertTrue(self.store.reserve("session", "right", routing.fingerprint(native, action["input"]), workspace, "turn"))
+        # Preserve fingerprints used by native calls before this fix.
+        self.assertEqual(routing.fingerprint(alias, action["input"]), routing._hash([native, action["input"]]))
+
+    async def test_alias_cannot_bypass_native_denial_or_repeated_failure(self):
+        alias = "mcp__codex_apps__plugin_management_search_plugins"
+        native = "mcp__codex_apps__plugin_management__search_plugins"
+        action = {**candidate(), "tool_name": native, "input": {"query": "Jev", "limit": 5}}
+        self.choose.return_value = {"disposition": "selected", "selected_candidate": action}
+        for index in range(2):
+            await self.register(action)
+            routing.pre_tool("session", str(index), alias, action["input"], self.store)
+            await routing.post_tool("session", str(index), native, action["input"],
+                                    {"exit_code": 1}, self.store, self.retry)
+        action["tool_name"] = alias
+        self.assertEqual((await self.register(action))["disposition"], "architect")
+        signature = routing.fingerprint(native, action["input"])
+        self.assertEqual(self.store.failures("session", signature), 2)
+        # A different scope with an explicit denial must also remain blocked.
+        self.store.grant("denied-session", [action])
+        self.store.reserve("denied-session", "denied", signature)
+        self.store.complete("denied-session", "denied", signature, "denied")
+        result = await routing.select_action("denied-session", "Inspect plugin", [action],
+                                             self.choose, self.retry, self.store)
+        self.assertEqual(result["reason"], "permission_denied")
+
+    async def test_alias_unknown_outcome_requires_reconciliation(self):
+        alias = "mcp__codex_apps__plugin_management_search_plugins"
+        native = "mcp__codex_apps__plugin_management__search_plugins"
+        action = {**candidate(), "tool_name": alias, "input": {"query": "Jev", "limit": 5}}
+        self.choose.return_value = {"disposition": "selected", "selected_candidate": action}
+        await self.register(action)
+        routing.pre_tool("session", "unknown-alias", native, action["input"], self.store)
+        await routing.post_tool("session", "unknown-alias", native, action["input"], "stdout only", self.store, self.retry)
+        action["tool_name"] = native
+        self.assertEqual((await self.register(action))["next_step"], "report_outcome")
+        result = await routing.report_outcome("session", "", "", "unknown-alias", 0, False, self.store, self.retry)
+        self.assertEqual(result["recorded_outcome"], "passed")
+        self.assertEqual((await self.register(action))["disposition"], "selected")
+
+    async def test_context_probe_bootstraps_without_granting_or_blocking(self):
+        cwd = str(Path(self.temp.name).resolve())
+        result = routing.pre_tool("session", "probe", routing.CONTEXT_TOOL, {}, self.store, cwd, "turn-a")
+        text = result["hookSpecificOutput"]["additionalContext"]
+        self.assertNotIn("permissionDecision", result["hookSpecificOutput"])
+        self.assertIn('"session_id": "session"', text)
+        self.assertIn('"turn_id": "turn-a"', text)
+        self.assertIn(json.dumps(cwd), text)
+        self.assertFalse(self.store.path.exists())
+        self.assertFalse(self.store.reserve("session", "unselected", self.signature, cwd, "turn-a"))
+        await routing.select_action("session", "Run tests", [self.action], self.choose, self.retry,
+                                    self.store, cwd, "turn-a")
+        pre = routing.pre_tool("session", "selected", "Bash", self.action["input"], self.store, cwd, "turn-a")
+        self.assertNotIn("permissionDecision", pre["hookSpecificOutput"])
+        other = routing.pre_tool("other-session", "probe", routing.CONTEXT_TOOL, {}, self.store, cwd, "turn-b")
+        self.assertIn('"session_id": "other-session"', other["hookSpecificOutput"]["additionalContext"])
+        self.assertFalse(self.store.reserve("other-session", "wrong", self.signature, cwd, "turn-b"))
+
+    async def test_invalid_context_probe_never_invents_scope(self):
+        result = routing.pre_tool("invalid session", "probe", routing.CONTEXT_TOOL, {}, self.store, "relative", "turn")
+        self.assertNotIn("permissionDecision", result["hookSpecificOutput"])
+        self.assertIn("scope unavailable", result["hookSpecificOutput"]["additionalContext"])
+        self.assertFalse(self.store.path.exists())
+
     async def test_uncertainty_grants_valid_main_fallback_without_model_loop(self):
         self.choose.return_value = {"disposition": "main", "reason": "uncertain"}
         result = await self.register()

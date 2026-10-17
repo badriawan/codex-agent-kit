@@ -21,8 +21,13 @@ async def check(live: bool):
         names = sorted(tool.name for tool in tools)
         assert names == sorted(["route_work", "review_change", "choose_file", "choose_tool",
                                 "retry_decision", "choose_action", "pre_tool", "post_tool",
-                                "reviewed_retry", "report_outcome"]), names
+                                "reviewed_retry", "report_outcome", "routing_context"]), names
         print("MCP tools:", ", ".join(names))
+        context_result = await client.call_tool("routing_context", {})
+        assert not context_result.is_error, "Routing context endpoint failed"
+        assert context_result.structured_content.get("grants_action") is False
+        assert "session_id" not in context_result.structured_content
+        print("Routing context endpoint: available, local, no action granted")
         if live:
             cases = [
                 ("route_work", {"task_summary": "Read existing Python source to find where command arguments are parsed. Report file paths only; no edits."}),

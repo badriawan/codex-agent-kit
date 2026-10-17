@@ -116,6 +116,13 @@ digunakan untuk membangun aplikasi berbasis TypeSafe.
 
 ## Batas dan penggunaan
 
+- Pada awal setiap turn/workspace, agen memanggil `routing_context` tanpa argumen.
+  Hook memberikan scope sesi/workspace/turn sebelum tindakan pertama, tanpa
+  memblokir atau memberi izin tindakan. Endpoint ini lokal dan tidak memanggil API.
+  Mulai sesi baru setelah upgrade server/allowlist tool agar endpoint tersedia.
+- Nama callable dan native yang telah diverifikasi dinormalisasi melalui alias
+  eksplisit. Pemisah underscore tidak digabung secara umum; nama alat lain,
+  argumen, batas sesi, dan hasil kegagalan tetap diperiksa.
 - Agen menyediakan kandidat lengkap dengan ID, nama tool, input lokal, file
   relatif, ringkasan, dan keamanan retry. Jev memilih kandidat yang tersedia;
   hook tidak menciptakan perintah atau mengganti target patch. Pilihan discope
@@ -124,9 +131,9 @@ digunakan untuk membangun aplikasi berbasis TypeSafe.
   Argumen asli, output, transcript, konfigurasi, dan environment tetap lokal.
   Jangan memasukkan isinya ke kolom ringkasan. State SQLite menyimpan fingerprint
   dan hasil/status, bukan isi perintah atau output.
-- Hook native perlu direview dan dipercaya melalui `/hooks`. Hosted tools,
-  `write_stdin` yang melanjutkan proses lama, dan beberapa jalur khusus tidak
-  diintersepsi. Server yang tidak tersedia atau hook error memakai fallback
+- Hook native perlu direview dan dipercaya melalui `/hooks`. Cakupan tergantung
+  host; web search juga dapat diintersepsi. `write_stdin` yang melanjutkan proses
+  lama dan beberapa jalur khusus tidak diintersepsi. Server atau hook error memakai fallback
   main; hook bukan batas keamanan dan bukan pengganti sandbox.
 - Hasil tidak pasti mengembalikan satu pilihan ke main. Kegagalan terstruktur
   dipertahankan; hasil yang tidak dikenali tidak dianggap lulus. Tidak ada
