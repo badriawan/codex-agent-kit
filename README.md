@@ -11,17 +11,19 @@ Paket ini memindahkan **konfigurasi dan aturan kerja**. Aturan workflow adalah i
 | Worker | `gpt-6.1-sol` | medium | Implementasi terarah, pemeriksaan proporsional, dan laporan hasil aktual |
 | Explorer | `gpt-6-luna` | medium | Menelusuri kode tanpa mengedit |
 | Researcher | `gpt-6-luna` | medium | Mengumpulkan bukti dan dokumentasi tanpa mengedit |
-| Jev (opsional) | `jev-1.13.0` | — | Pilihan kandidat file/tool/aksi, retry, delegasi, dan review perubahan |
+| Jev (opsional) | `jev-1.14.0` | — | Saran peran subagen; kode MCP memvalidasi, main memanggil |
 
 ```mermaid
 flowchart TD
     User[Tugas biasa dari pengguna] --> Main[Main: Sol]
     Main --> Architect[Architect: Astra\nSebelum rencana besar, error yang sama berulang,\natau sebelum tugas panjang dinyatakan selesai]
     Architect --> Main
-    Main -. Pilihan delegasi yang tidak sederhana .-> Jev[Jev MCP opsional\nSaran, bukan izin]
-    Main --> Explorer[Explorer: Luna]
-    Main --> Researcher[Researcher: Luna]
-    Main --> Worker[Worker: Sol]
+    Main -. Pilihan delegasi yang tidak sederhana .-> Jev[Jev MCP: saran peran]
+    Jev --> Validate[Kode MCP: validasi role tersedia]
+    Validate --> Spawn[Main: spawn_agent dengan model terkunci]
+    Spawn --> Explorer[Explorer: Luna]
+    Spawn --> Researcher[Researcher: Luna]
+    Spawn --> Worker[Worker: Sol]
     Explorer --> Verify[Main: integrasi dan verifikasi]
     Researcher --> Verify
     Worker --> Verify
@@ -30,11 +32,11 @@ flowchart TD
 
 Default: **3 thread subagen yang terbuka bersamaan**, di luar agen utama, sehingga totalnya **4 agen termasuk main**. Architect memakai slot subagen yang sama; jalankan review secara bertahap bila tiga slot sedang terpakai. Kapasitas efektif mengikuti batas klien/runtime yang lebih rendah.
 
-Main memeriksa bukti dari subagen, mengintegrasikan hasil, dan melakukan verifikasi akhir. Jev dapat memilih kandidat file/tool/aksi dan langkah retry; hook native memeriksa panggilan lokal secara otomatis. Tool hosted seperti web search dan I/O internal sebuah skrip berada di luar cakupan hook. Instalasi inti mempertahankan permission perangkat; aktivasi routing dan `auto_review` memakai langkah opt-in berikut.
+Main memeriksa bukti dari subagen, mengintegrasikan hasil, dan melakukan verifikasi akhir. Jev hanya menyarankan peran subagen; kode MCP memvalidasi pilihan terhadap role yang diberikan main. Main memanggil role yang valid tanpa menilai ulang pilihan peran. Mode ini tidak memakai hook tindakan Jev. Instalasi inti mempertahankan permission perangkat; Jev role-only dan `auto_review` dipasang terpisah sesuai langkah berikut.
 
 ## Persiapan
 
-- Git, Python **3.11 atau lebih baru**, dan Codex CLI yang mendukung standalone custom agents serta native MCP tool hooks untuk routing otomatis. Aktivasi hook dan mode Auto-review diuji pada `codex-cli 0.160.0`.
+- Git, Python **3.11 atau lebih baru**, dan Codex CLI yang mendukung standalone custom agents serta MCP stdio. Workflow role-only tidak memerlukan native action hooks.
 - Instal Codex mengikuti [petunjuk resmi](https://learn.chatgpt.com/docs/codex/cli), lalu jalankan `codex login` di perangkat tersebut.
 - Pastikan akun/provider Anda memiliki akses ke model pada tabel. Default ini dipilih untuk akun yang menguji kit, bukan jaminan ketersediaan universal. Jika perlu, edit `config/base.toml` dan `config/agents/*.toml` **sebelum memasang**. Paket ini tidak memberikan akses model.
 - Tutup sesi Codex sebelum mengubah konfigurasi. Mulai sesi baru setelah pemasangan.
@@ -131,43 +133,61 @@ Gunakan `--codex-home` yang sama bila sebelumnya ditentukan. Recovery mengembali
 
 Kit inti bekerja tanpa Jev. Server MCP, skill `$jev`, dependensi, tes, serta petunjuk konfigurasi per perangkat ada di [integrations/jev](integrations/jev/README.md). Siapkan `TYPESAFE_API_KEY` secara lokal; kunci tidak disimpan di repo atau dipindahkan antardevice. Panggilan Jev memakai akun TypeSafe dan dapat menimbulkan biaya. Saran Jev tidak menggantikan review architect atau memberi izin eksekusi/publikasi.
 
-## Aktifkan routing otomatis dan Auto-review
+## Aktifkan Jev untuk pemilihan peran
 
-Setelah menyiapkan environment dan API key Jev sesuai panduan integrasi, jalankan dari root clone.
+Workflow yang dipilih: primary menyusun tugas dan role yang tersedia → Jev
+merekomendasikan role → kode MCP memvalidasi → primary memanggil native subagen
+dengan model yang tetap terkunci → primary mengintegrasikan dan memverifikasi.
+Jev hanya memberi saran peran; ia tidak memilih model, file, tool, tindakan,
+retry, atau menilai perubahan.
 
-macOS / Linux / WSL:
+Setelah menyiapkan environment dan API key sesuai [panduan Jev](integrations/jev/README.md),
+jalankan dari root clone:
 
 ```sh
-.venv/bin/python configure_runtime.py install --auto-review --jev --jev-python "$PWD/integrations/jev/.venv/bin/python" --dry-run
-.venv/bin/python configure_runtime.py install --auto-review --jev --jev-python "$PWD/integrations/jev/.venv/bin/python"
+.venv/bin/python configure_runtime.py install --jev-roles-only --jev-python "$PWD/integrations/jev/.venv/bin/python" --dry-run
+.venv/bin/python configure_runtime.py install --jev-roles-only --jev-python "$PWD/integrations/jev/.venv/bin/python"
 .venv/bin/python configure_runtime.py status
 ```
 
-Windows PowerShell:
+Pada Windows gunakan path absolut `integrations/jev/.venv/Scripts/python.exe` dan
+interpreter kit di `.venv/Scripts/python.exe`. Pasang skill Jev yang diperbarui dan
+bagian role-only dari template `config/AGENTS.md`, lalu mulai sesi baru agar
+MCP dan metadata skill termuat ulang. Mode ini hanya mengekspos `route_work`
+melalui `role_server.py`, tanpa hook tindakan atau SQLite routing state.
 
-```powershell
-$jevPythonPath = (Resolve-Path integrations/jev/.venv/Scripts/python.exe).Path
-.\.venv\Scripts\python.exe configure_runtime.py install --auto-review --jev --jev-python $jevPythonPath --dry-run
-.\.venv\Scripts\python.exe configure_runtime.py install --auto-review --jev --jev-python $jevPythonPath
-.\.venv\Scripts\python.exe configure_runtime.py status
-```
+Primary menggunakan rekomendasi yang valid tanpa mengulang penilaian peran,
+sambil mempertahankan otorisasi, batas paralel, serta checkpoint architect.
+Jika Jev gagal/ragu atau memilih `main`, primary memutuskan sendiri sekali.
+MCP memeriksa daftar role yang diberikan primary; ia tidak membuktikan
+ketersediaan runtime secara independen.
 
-Opsi `--auto-review` mengatur `approval_policy="on-request"`, `approvals_reviewer="auto_review"`, dan `sandbox_mode="workspace-write"`. Reviewer native menilai permintaan yang melewati batas sandbox; aktivitas yang sudah diizinkan di dalam sandbox berjalan biasa. Kebijakan organisasi atau pilihan permission chat dapat mendahului konfigurasi lokal. Sesi yang sudah terbuka tidak otomatis berubah mode.
+Installer mencadangkan konfigurasi secara privat dan memigrasikan kepemilikan
+hook lama dengan mempertahankan rollback originals. Kondisi lama yang sengaja
+dinonaktifkan ditangani secara terbatas; edit lain pada nilai yang dikelola
+masih ditolak. Gunakan `--dry-run` untuk melihat file yang akan diperbarui.
 
-Opsi `--jev` mengatur koneksi MCP pada interpreter perangkat ini dan hook `PreToolUse`/`PostToolUse`. Pasang juga skill Jev sesuai panduan integrasinya. Buka `/hooks`, tinjau dan trust definisi hook, lalu mulai sesi baru. Memasang konfigurasi saja belum membuktikan hook aktif. Hook memeriksa kandidat yang dipilih Jev; main tetap menyediakan kandidat, menjalankan tool, serta menangani ketidakpastian. Penolakan izin menghentikan retry, dan dua kegagalan yang sama meminta review architect. Hook tidak menjalankan ulang perintah atau menyetujui permission.
+## Auto-review dan mode legacy
 
-Kedua opsi boleh dipasang terpisah. Installer mencadangkan konfigurasi secara privat dan mempertahankan setting/hook lain. Jika `hooks.json` sudah ada, gabungkan secara sadar ke representasi TOML sebelum memasang agar hook tidak dimuat dua kali. Untuk mengembalikan hanya perubahan opt-in:
+Auto-review terpisah dari Jev dan dapat dipasang dengan
+`configure_runtime.py install --auto-review`. Opsi tersebut mengatur
+`approval_policy="on-request"`, `approvals_reviewer="auto_review"`, dan
+`sandbox_mode="workspace-write"`. Kebijakan sesi/organisasi tetap berlaku.
+
+Opsi lama `--jev` dipertahankan untuk kompatibilitas dan memasang routing tindakan
+serta hook. **Jangan gunakan opsi tersebut untuk workflow role-only ini.**
+Tidak perlu `/hooks` trust untuk mode role-only.
+
+Untuk mengembalikan perubahan yang dikelola installer runtime:
 
 ```sh
-python configure_runtime.py uninstall --dry-run
-python configure_runtime.py uninstall
+.venv/bin/python configure_runtime.py uninstall --dry-run
+.venv/bin/python configure_runtime.py uninstall
 ```
 
-Gunakan interpreter `.venv` sesuai OS seperti contoh sebelumnya. Jika ingin menghapus seluruh kit, hapus opsi runtime terlebih dahulu, lalu jalankan uninstall inti.
-
-Jika proses konfigurasi dihentikan paksa di antara penulisan config dan state runtime, pemulihan dapat memerlukan salinan privat di `.agent-kit/runtime-backups/`. Simpan config saat ini sebelum mengembalikan file dari cadangan yang relevan; jangan unggah folder tersebut.
-
-Sebagian versi CLI hanya memberi stdout kepada PostToolUse. Dalam kondisi itu agen otomatis melaporkan exit status yang benar melalui `report_outcome`; stdout tidak dianggap sebagai bukti keberhasilan. Setelah dua kegagalan, main dapat memakai `reviewed_retry` dengan referensi review architect yang sebenarnya untuk satu percobaan aman setelah perbaikan. Kedua laporan adalah attestasi main; server tidak memverifikasi isi review atau hasil tool secara independen.
+Uninstall runtime mengembalikan seluruh opsi runtime yang dikelolanya, termasuk
+Auto-review bila sebelumnya dipasang melalui installer itu. Backup privat tetap
+tersimpan; jangan unggah folder backup/manifest karena dapat berisi config pribadi.
 
 ## Verifikasi
 
@@ -177,7 +197,7 @@ python -m unittest discover -s tests -v
 
 Tes installer menggunakan direktori sementara: pemasangan baru/berulang, dry-run, TOML kompleks, pelestarian instruksi dan file lama, uninstall setelah perubahan lain, deteksi konflik, symlink, rollback kegagalan, dan pemulihan proses terputus.
 
-Tes runtime dan routing memeriksa pemilihan kandidat, fallback satu pilihan, isolasi workspace/turn, kejadian konkuren, larangan replay setelah penolakan, error berulang, serta pemisahan input lokal dari payload API. Tes offline tidak memverifikasi trust atau aktivasi hook pada sesi Codex nyata.
+Tes role-only memeriksa input/hasil terlarang, fallback, timeout, distribusi probabilitas, discovery satu tool, dan isolasi dari routing lama. Tes runtime memeriksa migrasi, pelestarian konfigurasi, rollback, dan uninstall. Tes routing legacy dipertahankan untuk kompatibilitas. Tes offline tidak membuktikan sesi host sudah memuat MCP atau akses API live.
 
 GitHub Actions menjalankan tes installer, tes offline Jev, dan discovery MCP pada Ubuntu, macOS, dan Windows dengan Python 3.11/3.13. Periksa status workflow repositori sebelum menganggap ketiganya telah lulus. Tes ini tidak membuktikan akses akun terhadap setiap model atau memanggil API berbayar.
 

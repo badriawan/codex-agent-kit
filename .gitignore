@@ -8,5 +8,9 @@ auth.json
 *.pem
 *.key
 .agent-kit/
+.routing-fix-backup*/
+*.sqlite
+*.sqlite-shm
+*.sqlite-wal
 dist/
 .DS_Store

@@ -1,103 +1,42 @@
 ---
 name: jev
-description: Use Jev for automatic candidate file/tool/action selection, bounded retry decisions, delegation, and change review in Codex. Native hooks check supported local actions when routing is enabled.
+description: Ask Jev to suggest an available Codex subagent role for a nontrivial delegation choice. Code validates the role; primary invokes the agent with its locked model.
 ---
 
-# Jev decision layer
+# Jev role-only delegation
 
-The main agent plans and executes; Jev selects among supplied candidates. Use the
-connected `jev` MCP tools automatically when work reaches these decisions.
-Required architect reviews take priority.
+Primary owns the task, scope, execution, integration, and final verification.
+Jev suggests only a role; the MCP server validates the structured recommendation.
 
-## File, tool, and action choices
+## Use the recommendation
 
-Use `choose_file(task_summary, candidates)` with candidates containing `id`,
-`path`, and `summary`. Paths are relative to the workspace. Use `choose_tool`
-with candidates containing `id`, `name`, and `summary`; include only tools that
-are actually available. Provide plausible alternatives where there is a choice.
+1. Keep simple tasks in primary. Invoke architect directly at mandatory review
+   checkpoints. For other useful delegation choices, list only the canonical
+   roles actually available and eligible in this session: `explorer`,
+   `researcher`, `worker`, `architect`.
+2. Call the connected `jev.route_work` once with `task_summary` and
+   `available_roles`. Send a brief non-secret summary, not files, commands,
+   output, full prompts, transcripts, credentials, or configuration.
+3. A usable result has `validated=true`, `disposition=selected`, and `agent_type`
+   matching a supplied role. Forward that role to native `spawn_agent` with the
+   bounded task and expected output. Do not redo semantic role selection. Keep
+   the custom role's fixed model and reasoning effort. Runtime permissions,
+   task authorization, and concurrency limits still apply; replan if the task
+   or availability changed.
+4. On `main`, uncertainty, invalid output, unavailable API, or missing MCP tool,
+   primary chooses once and continues. Do not retry Jev to seek another answer.
 
-At the start of each turn/workspace, call `routing_context` with no arguments.
-Its native hook supplies the exact `session_id`, `cwd`, and `turn_id` without
-blocking an action. Use that scope in `choose_action` before supported local
-actions; never reuse another turn's scope. If the endpoint or its hook context
-is unavailable, report the limitation rather than inventing scope or deliberately
-triggering a blocked call. Each candidate contains:
+The server checks the caller's role list; it cannot independently discover live
+roles, reserve a slot, spawn an agent, or grant execution permission. The
+confidence threshold is provisional and does not establish correctness.
 
-- `id`: unique simple identifier, excluding main/retry/change/stop/architect.
-- `tool_name`: native hook name such as `Bash`, `apply_patch`, or exact MCP name.
-- `input`: actual tool arguments, kept locally and not sent to TypeSafe.
-- `files`: relative file paths involved, or an empty array.
-- `summary`: concise, non-secret purpose of the action.
-- `retry_safe`: true only when replay cannot duplicate external effects or
-  unexpectedly change data.
+## Installed mode
 
-Use native `tool_input.command` for Bash and apply_patch. Execute the selected
-candidate through the ordinary tool; the hook checks the routing record. Shell
-routing checks the native input observed by Codex, not arbitrary I/O performed
-inside a script. Hooks never rewrite commands or patch targets.
-Verified callable/native aliases normalize centrally, including the plugin
-search tool's single/double namespace underscore and `web__run`/`webrun`.
-Other tool names and all input keys must match; never collapse underscores
-generally. Use the native input shape when the host exposes one. `max_output_tokens`
-and `yield_time_ms` are output transport options and do not affect matching;
-execution-affecting options are retained when the runtime exposes them.
+Role-only mode exposes only `route_work` through `role_server.py`. It uses no
+Jev action hooks, routing context, file/tool/action selection, retry decisions,
+or change review. Auto-review is independent. If legacy tools are still shown,
+do not use them; report that the session needs to reload the role-only server.
 
-For an uncertain/unavailable result or no match, main assesses eligible validated
-candidates once. The first selected action consumes the fallback decision group.
-If none is eligible, provide a corrected candidate or follow the retry/review
-instruction. Never loop on the same blocked call or query Jev for a preferred result.
-
-Candidate selection grants no permission. Respect normal sandbox limits,
-external-write authorization, Auto-review, and required architect reviews.
-
-## Failures and retries
-
-PostToolUse records explicit outcomes and automatically selects retry guidance.
-Original tool evidence stays available; unknown output is not success. Outside
-hook coverage, call `retry_decision` with a short non-secret error summary,
-matching failed-attempt count, retry safety, and permission-denied flag.
-
-Some native CLI versions supply only stdout to PostToolUse. When the hook asks,
-automatically call `report_outcome` using its exact session/cwd/turn/call IDs and
-the actual observed exit code or permission denial from the tool result. Never
-infer success from the stdout text. An unknown record can be reconciled once;
-the server treats this as main-attested evidence, not independent verification.
-
-- Permission denial stops replay.
-- Two matching failed attempts require architect review regardless of confidence.
-- Unsafe replay returns to main for a corrected action.
-- A retry recommendation still needs a fresh chosen action and normal permissions.
-
-After actual architect review and any necessary repair, use `reviewed_retry` for
-one safe retry of the unchanged test command. Supply the candidate, current scope,
-real review reference, and non-secret review summary. This main-attested review
-is tied to the current failure revision and cannot override permission denial.
-
-Native hooks cover supported local function tools, shell, patches, and MCP tools.
-Coverage depends on the host; web search may also be intercepted. Ongoing
-`write_stdin` transport is outside hook coverage. Jev and review/control calls
-are exempt to avoid recursion/deadlock; the context probe only emits scope.
-Missing servers or hook failures fall back to main; hooks are not a security boundary.
-
-## Delegation and change review
-
-Use `route_work(task_summary)` for useful, nontrivial choices among existing roles.
-Skip trivial tasks and choices determined by instructions. Roles are not models.
-
-Use `review_change` for substantial changes with the plan, observed change summary,
-actual validation (`passed`, `failed`, `not_run`, `unknown`), outside-plan effects,
-and irreversibility. Follow its deterministic next step. It reads no files and
-runs no tests; positive advice cannot cancel failed validation or required reviews.
-
-## Data and setup
-
-Only send short non-secret task/candidate/error summaries. Never put credentials,
-raw commands, patch contents, output, full configuration, or environment dumps into
-summary fields. Candidate `input` remains local. Probabilities and thresholds are
-provisional advice, not measured accuracy or authorization.
-
-Each device needs its own API key and Python environment. Enable routing through
-`configure_runtime.py install --jev`, review/trust the exact hooks using `/hooks`,
-and start a new session. Native Auto-review is enabled separately with
-`--auto-review`; Jev never approves permission requests. If tools are missing,
-report that limitation and continue using main's judgment and required reviews.
+Configure with `configure_runtime.py install --jev-roles-only --jev-python`
+using the device's absolute Python path, then start a new session to load the
+new MCP and skill metadata. Each device needs its own TypeSafe credentials.

@@ -1,162 +1,111 @@
-# Jev MCP opsional
+# Jev: saran peran subagen
 
-Integrasi ini memilih kandidat file (`choose_file`), tool (`choose_tool`), aksi
-lengkap (`choose_action`), dan langkah retry (`retry_decision`), selain delegasi
-(`route_work`) dan review perubahan (`review_change`). Hook native `pre_tool` dan
-`post_tool` otomatis memeriksa pilihan dan mencatat hasil panggilan lokal.
-Instalasi inti kit **tidak mengaktifkan Jev**; routing dipasang melalui installer
-opt-in pada README utama. Konfigurasi manual di bawah cocok untuk tool tanpa hook.
+Workflow yang digunakan adalah **primary → Jev → validasi kode MCP → primary
+memanggil subagen → primary memverifikasi hasil**. Model dan reasoning effort
+setiap custom role tetap terkunci. Jev tidak membuat agen atau menyetujui izin.
 
-File server, pengaturan, dependensi langsung, dan tes mempertahankan integrasi
-asal: model `jev-1.13.0`, `typesafe-sdk==0.7.5`, dan `mcp==2.3.0`.
-Dependensi transitif belum dikunci. Gunakan Python 3.11 atau lebih baru dan jaringan
-untuk memasang paket. Setiap perangkat perlu membuat virtual environment sendiri;
-jangan menyalin `.venv` dari perangkat lain.
+Server `role_server.py` berdiri sendiri dan hanya menyediakan `route_work`.
+Ia tidak mengimpor server routing lama, tidak membuat SQLite routing state,
+dan tidak memasang hook tindakan. `server.py`, `routing.py`, dan tes lamanya
+dipertahankan untuk kompatibilitas mode legacy; jangan gunakan mode tersebut
+untuk workflow ini.
 
-## Persiapan
+## Kontrak tool
 
-Dari direktori `integrations/jev` pada clone Anda, jalankan salah satu berikut.
+```json
+{
+  "task_summary": "Read existing code and identify the argument parsing entrypoint; no edits.",
+  "available_roles": ["explorer", "researcher", "worker", "architect"]
+}
+```
 
-macOS / Linux:
+Primary memberikan ringkasan singkat tanpa secret serta subset role yang benar-benar
+tersedia dan diizinkan. Daftar harus unik, tidak kosong, dan hanya berisi nama
+canonical tersebut. `main` ditambahkan server sebagai pilihan abstain. Server
+memvalidasi format, pilihan, distribusi probabilitas, dan confidence; ketersediaan
+runtime berasal dari informasi primary, bukan discovery independen MCP.
+
+Hasil yang dapat diteruskan memiliki `validated=true`, `disposition="selected"`,
+serta `selected_role` dan `agent_type` yang sama. Primary memakai `agent_type`
+untuk native `spawn_agent` dengan tugas lengkap, tanpa menilai ulang pemilihan
+peran. Jangan memberikan override model/effort. Runtime tetap memeriksa izin dan
+slot; primary tetap memeriksa otorisasi tugas dan perubahan konteks.
+
+Untuk input/hasil tidak valid, `main`, confidence rendah, timeout, atau API gagal,
+hasil memiliki `disposition="main"`, `validated=false`, tanpa `agent_type`.
+Primary memutuskan sekali tanpa mengulang Jev. Tugas sederhana dikerjakan primary;
+checkpoint architect wajib langsung mengikuti aturan.
+
+## Pasang dan aktifkan
+
+Gunakan Python 3.11+. Buat environment per perangkat; jangan menyalin `.venv`.
+Dari direktori ini:
 
 ```sh
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/python -m unittest -v test_server.py
-.venv/bin/python check_connection.py
+.venv/bin/python -m unittest -v test_role_server.py
+.venv/bin/python check_role_connection.py
 ```
 
-Windows PowerShell:
-
-```powershell
-py -3 -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
-.\.venv\Scripts\python.exe -m unittest -v test_server.py
-.\.venv\Scripts\python.exe check_connection.py
-```
-
-Pemeriksaan di atas berjalan offline setelah pemasangan dependensi: tes memakai
-mock dan `check_connection.py` hanya memeriksa discovery MCP. Opsi `--live`
-melakukan dua permintaan API dan dapat menimbulkan biaya; gunakan hanya jika
-Anda memang ingin memeriksa koneksi langsung.
-
-## API key dan konfigurasi Codex
-
-Sediakan environment variable **`TYPESAFE_API_KEY`** pada proses yang menjalankan
-Codex, melalui pengelola secret atau konfigurasi lingkungan perangkat Anda.
-Jangan masukkan nilainya ke repository, `AGENTS.md`, atau berkas konfigurasi ini.
-Aplikasi desktop yang dibuka dari launcher mungkin tidak mewarisi environment
-terminal; pastikan variabel tersedia pada proses Codex yang sebenarnya.
-
-Alternatif untuk aplikasi desktop: `mcp_servers.jev.env` dapat memasok
-`TYPESAFE_API_KEY` langsung ke proses server. Masukkan nilainya hanya ke
-`config.toml` pribadi di luar repository, dengan permission privat (mode `600`
-di POSIX). Jangan menyalin konfigurasi yang berisi kunci ke repo atau perangkat
-lain; setiap perangkat perlu menyiapkan kredensialnya sendiri.
-
-Tambahkan tabel berikut ke `config.toml` di direktori konfigurasi Codex Anda
-(umumnya `~/.codex/config.toml`, atau lokasi `CODEX_HOME` Anda). Jika tabel
-`mcp_servers.jev` sudah ada, sesuaikan tabel itu agar tidak duplikat.
-Ganti kedua path contoh dengan **path absolut** clone pada perangkat ini.
-
-macOS / Linux:
-
-```toml
-[mcp_servers.jev]
-command = "/ABSOLUTE/PATH/codex-agent-kit/integrations/jev/.venv/bin/python"
-args = ["/ABSOLUTE/PATH/codex-agent-kit/integrations/jev/server.py"]
-env_vars = ["TYPESAFE_API_KEY"]
-enabled_tools = ["route_work", "review_change", "choose_file", "choose_tool", "retry_decision", "choose_action", "pre_tool", "post_tool", "reviewed_retry", "report_outcome"]
-startup_timeout_sec = 20
-tool_timeout_sec = 25
-```
-
-Windows (gunakan garis miring `/` dalam string TOML):
-
-```toml
-[mcp_servers.jev]
-command = "C:/ABSOLUTE/PATH/codex-agent-kit/integrations/jev/.venv/Scripts/python.exe"
-args = ["C:/ABSOLUTE/PATH/codex-agent-kit/integrations/jev/server.py"]
-env_vars = ["TYPESAFE_API_KEY"]
-enabled_tools = ["route_work", "review_change", "choose_file", "choose_tool", "retry_decision", "choose_action", "pre_tool", "post_tool", "reviewed_retry", "report_outcome"]
-startup_timeout_sec = 20
-tool_timeout_sec = 25
-```
-
-Mulai ulang sesi Codex setelah konfigurasi berubah. Sepuluh tool seharusnya tersedia
-di server MCP `jev`. Untuk menonaktifkan, tambahkan `enabled = false` pada tabel
-tersebut. `settings.toml` mengatur batas waktu API 15 detik, batas masukan 12.000
-karakter, dan ambang advisory sementara 0,70. Server tidak melakukan retry API.
-
-## Skill Jev
-
-Salinan skill tersedia di `skill/jev/SKILL.md`. Untuk memasangnya, jalankan dari
-folder `integrations/jev` setelah MCP dikonfigurasi.
-
-macOS / Linux (sesuaikan tujuan bila memakai `CODEX_HOME`):
+Siapkan `TYPESAFE_API_KEY` pada lingkungan proses Codex. Konfigurasi pribadi
+`mcp_servers.jev.env.TYPESAFE_API_KEY` juga didukung; simpan hanya pada file privat,
+bukan repository atau ringkasan permintaan. Kredensial tidak dipindahkan antarperangkat.
+Dari root kit, gunakan interpreter kit yang memiliki `tomlkit`:
 
 ```sh
-mkdir -p "${CODEX_HOME:-$HOME/.codex}/skills"
-cp -R skill/jev "${CODEX_HOME:-$HOME/.codex}/skills/"
+.venv/bin/python configure_runtime.py install --jev-roles-only --jev-python "$PWD/integrations/jev/.venv/bin/python" --dry-run
+.venv/bin/python configure_runtime.py install --jev-roles-only --jev-python "$PWD/integrations/jev/.venv/bin/python"
+.venv/bin/python configure_runtime.py status
 ```
 
-Windows PowerShell:
+Installer mencadangkan perubahan secara privat, mempertahankan kredensial dan
+setting lain, serta memigrasikan hook milik Jev dari mode legacy. Kondisi legacy
+yang sengaja dinonaktifkan (`enabled=false`, hook Jev dilepas) ditangani secara
+terbatas; edit lain pada nilai yang dikelola tetap ditolak. Role-only tidak
+memerlukan `/hooks` trust. Auto-review adalah pengaturan terpisah.
+Installer menolak `hooks.json`, hook Jev tanpa kepemilikan installer, dan original
+hook Jev yang akan dipulihkan saat migrasi. Selesaikan konflik tersebut sebelum
+mengaktifkan role-only; hook layanan lain tetap dipertahankan.
 
-```powershell
-$jevSkillsPath = if ($env:CODEX_HOME) { Join-Path $env:CODEX_HOME 'skills' } else { Join-Path $env:USERPROFILE '.codex/skills' }
-New-Item -ItemType Directory -Force -Path $jevSkillsPath | Out-Null
-Copy-Item -Recurse skill/jev $jevSkillsPath
+Salin `skill/jev/SKILL.md` ke folder skill Jev perangkat, dan gunakan bagian
+Jev role-only dari `config/AGENTS.md` pada aturan aktif. Mulai **sesi baru** agar
+server, allowlist tool, dan metadata skill termuat ulang. Jangan menganggap sesi
+lama sudah memakai workflow baru hanya karena file config berubah.
+
+Konfigurasi MCP yang dihasilkan:
+
+```toml
+[mcp_servers.jev]
+command = "/ABSOLUTE/PATH/integrations/jev/.venv/bin/python"
+args = ["/ABSOLUTE/PATH/integrations/jev/role_server.py"]
+enabled = true
+enabled_tools = ["route_work"]
+env_vars = ["TYPESAFE_API_KEY"]
 ```
 
-Jika skill `jev` sudah ada, periksa edit lokal sebelum menyalin versi baru.
-Mulai sesi Codex baru; gunakan `$jev` untuk meminta saran delegasi atau penilaian
-perubahan. Skill juga dapat dipilih otomatis saat tugas cocok dengan deskripsinya.
-Skill ini khusus memakai advisor MCP kit; skill vendor `typesafe-ai` tetap
-digunakan untuk membangun aplikasi berbasis TypeSafe.
+Untuk Windows gunakan path absolut interpreter `Scripts/python.exe`. Jangan
+menjalankan opsi legacy `--jev`: opsi tersebut memasang routing tindakan dan hook.
 
-## Batas dan penggunaan
+## Verifikasi
 
-- Pada awal setiap turn/workspace, agen memanggil `routing_context` tanpa argumen.
-  Hook memberikan scope sesi/workspace/turn sebelum tindakan pertama, tanpa
-  memblokir atau memberi izin tindakan. Endpoint ini lokal dan tidak memanggil API.
-  Mulai sesi baru setelah upgrade server/allowlist tool agar endpoint tersedia.
-- Nama callable dan native yang telah diverifikasi dinormalisasi melalui alias
-  eksplisit. Pemisah underscore tidak digabung secara umum; nama alat lain,
-  argumen, batas sesi, dan hasil kegagalan tetap diperiksa.
-- Agen menyediakan kandidat lengkap dengan ID, nama tool, input lokal, file
-  relatif, ringkasan, dan keamanan retry. Jev memilih kandidat yang tersedia;
-  hook tidak menciptakan perintah atau mengganti target patch. Pilihan discope
-  ke sesi, workspace, dan turn, dengan satu konsumsi per keputusan.
-- Hanya ringkasan task/kandidat/error dan metadata file/tool yang dikirim ke API.
-  Argumen asli, output, transcript, konfigurasi, dan environment tetap lokal.
-  Jangan memasukkan isinya ke kolom ringkasan. State SQLite menyimpan fingerprint
-  dan hasil/status, bukan isi perintah atau output.
-- Hook native perlu direview dan dipercaya melalui `/hooks`. Cakupan tergantung
-  host; web search juga dapat diintersepsi. `write_stdin` yang melanjutkan proses
-  lama dan beberapa jalur khusus tidak diintersepsi. Server atau hook error memakai fallback
-  main; hook bukan batas keamanan dan bukan pengganti sandbox.
-- Hasil tidak pasti mengembalikan satu pilihan ke main. Kegagalan terstruktur
-  dipertahankan; hasil yang tidak dikenali tidak dianggap lulus. Tidak ada
-  replay otomatis. Penolakan izin menghentikan retry; dua kegagalan identik
-  meminta review architect, terlepas dari confidence. Setelah review dan perbaikan,
-  `reviewed_retry` memberi satu percobaan aman pada revisi kegagalan yang sama;
-  referensi review merupakan attestasi main, bukan verifikasi independen server.
-- Pada CLI yang hanya mengirim stdout ke hook, agen memanggil `report_outcome`
-  secara otomatis dengan exit status asli. Stdout mentah tetap `unknown` dan
-  tidak boleh digunakan untuk menyimpulkan sukses atau penolakan izin.
+`check_role_connection.py` memeriksa discovery tepat satu tool dan fallback role
+tidak valid tanpa API. Satu percobaan live opsional memakai ringkasan sintetis:
 
-- Permintaan tool mengirim ringkasan yang Anda berikan ke TypeSafe dan dapat
-  dikenai biaya API terpisah. Kirim hanya ringkasan singkat tanpa secret atau
-  kredensial; server tidak membaca repository untuk menyusun masukan.
-- `route_work` menyarankan satu peran yang tersedia; tool ini tidak membuat agen.
-  Pemanggilan dan ketersediaan peran tetap mengikuti kemampuan host Codex.
-- `review_change` menilai rencana, ringkasan perubahan, dan hasil validasi yang
-  dilaporkan pemanggil. Tool ini tidak membuka berkas atau menjalankan tes.
-- Hasil adalah saran dan probabilitas, bukan izin untuk mengeksekusi, merge,
-  menerbitkan, atau melewati review architect yang diwajibkan.
-- Jika API gagal, tidak ada key, atau hasil tidak pasti, gunakan penilaian agen
-  utama dan pertahankan review architect yang diwajibkan. Jangan mengulang
-  permintaan berkali-kali hanya untuk mendapat saran yang diinginkan.
+```sh
+.venv/bin/python check_role_connection.py --live
+```
 
-Dokumentasi vendor: [TypeSafe Python SDK](https://docs.typesafe.ai/sdk/python),
-[Jev dengan coding agents](https://docs.typesafe.ai/introduction/coding-agents).
+Bila key hanya ada pada config pribadi, tambahkan `--codex-home /path/to/.codex`.
+Opsi ini hanya membaca key untuk child process dan tidak mencetak nilainya.
+`--live` mengirim satu permintaan TypeSafe dan dapat menimbulkan biaya API.
+Hasil checker adalah bukti subprocess MCP/API, bukan bukti sesi host sudah reload
+atau native `spawn_agent` sudah dijalankan.
+
+`settings.toml` mempertahankan `jev-1.14.0`, timeout API 15 detik, batas input
+12.000 karakter, dan threshold confidence sementara 0,70. Retry API otomatis 0.
+Threshold bukan ukuran akurasi workflow. Hanya ringkasan dan metadata role yang
+dikirim ke TypeSafe; full prompt, isi file, output, serta konfigurasi tidak dikirim.
+
+Tes offline menggunakan fake provider dan meliputi validasi, fallback, timeout,
+kontrak SDK, discovery MCP, dan isolasi dari modul routing lama.

@@ -1,5 +1,5 @@
-# Stable version pinned for repeatable judgments.
-model = "jev-1.13.0"
+# Version pinned for repeatable judgments.
+model = "jev-1.14.0"
 request_timeout_seconds = 15.0
 max_input_characters = 12000
 # Provisional uncertainty flag; not an accuracy estimate or permission to act.
